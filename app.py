@@ -1,5 +1,6 @@
 from datetime import time
 from pawpal_system import Owner, Pet, Task, Scheduler
+from agent import PawPalAgent
 
 import streamlit as st
 
@@ -132,6 +133,59 @@ else:
         target_pet.add_task(new_task)
         st.success(f"Added '{new_task.description}' to {target_pet.name}'s schedule.")
         st.rerun()
+
+st.divider()
+
+# ── Smart Scheduling (AI) ─────────────────────────────────────────────────────
+st.subheader("✨ Smart Scheduling (AI)")
+
+ai_input = st.text_input(
+    "Type your scheduling request naturally (e.g., Schedule a walk for Buddy at 5 PM)",
+    key="ai_input",
+)
+
+if st.button("Schedule with AI"):
+    if not ai_input.strip():
+        st.warning("Please enter a scheduling request.")
+    else:
+        with st.spinner("Parsing your request..."):
+            try:
+                agent = PawPalAgent()
+                parsed = agent.parse_user_request(ai_input.strip())
+            except Exception as e:
+                st.error(f"AI parsing failed: {e}")
+                parsed = None
+
+        if parsed:
+            ai_pet_name = parsed.get("pet_name", "").strip()
+            ai_task_desc = parsed.get("task_description", "").strip()
+            ai_time = parsed.get("time", "").strip()
+
+            matched_pet = next(
+                (p for p in st.session_state.owner.pets if p.name.lower() == ai_pet_name.lower()),
+                None,
+            )
+
+            if not matched_pet:
+                st.warning(
+                    f"No pet named **{ai_pet_name}** found. "
+                    "Please add that pet first using the 'Add a Pet' section above."
+                )
+            else:
+                ai_task = Task(
+                    description=ai_task_desc or "Task",
+                    time=ai_time or "09:00",
+                    duration=20,
+                    priority=2,
+                    category="Other",
+                    frequency="Once",
+                )
+                matched_pet.add_task(ai_task)
+                st.success(
+                    f"Task added to **{matched_pet.name}**'s schedule: "
+                    f"'{ai_task.description}' at {ai_task.time}"
+                )
+                st.rerun()
 
 st.divider()
 

@@ -17,10 +17,9 @@ My initial design uses a modular, object-oriented approach with four primary cla
 
 **b. Design changes**
 
-Based on the AI architectural review, I made three key refinements to the design:
-1. **Time Objects**: Changed the `Task.time` attribute from a string to `datetime.time` to ensure robust comparison and conflict detection logic.
+Based on the AI architectural review, I made two key refinements to the design:
+1. **Time Parsing**: `Task.time` stores time as a string (e.g., `"09:00"`). A `_parse_time()` helper converts it to a `datetime` object only when needed for arithmetic comparisons in conflict detection and sorting — keeping the data model simple while still supporting robust comparisons.
 2. **Task Context**: Added a `pet_name` field to the `Task` dataclass so that the Scheduler can identify which pet a task belongs to when tasks are flattened into a single list.
-3. **Conflict Dataclass**: Replaced raw tuples in the `Scheduler` with a dedicated `Conflict` dataclass to provide clearer, more readable output for the UI.
 
 ---
 
@@ -49,12 +48,12 @@ This is reasonable for a domestic pet care scenario where most tasks (feeding, m
 
 I used AI as a "Co-Architect" throughout the project:
 * **Design Brainstorming**: Using Claude to refine the initial class structures and identify data bottlenecks.
-* **Refactoring**: Leveraging AI to quickly convert string-based time logic to `datetime.time` across the entire codebase.
+* **Refactoring**: Leveraging AI to design the `_parse_time()` helper that converts string times to `datetime` objects for arithmetic comparisons, keeping the data model simple while supporting robust conflict detection.
 * **Logic Implementation**: Providing high-level pseudo-code prompts to have the AI "flesh out" method bodies for the Scheduler and recurring task logic.
 
 **b. Judgment and verification**
 
-During the Phase 1 review, the AI suggested a `Conflict` dataclass instead of raw tuples. I didn't blindly accept it until I realized it would make the Streamlit UI code much cleaner. I evaluated this by attempting to write the UI code both ways and found that the AI’s suggestion significantly reduced the amount of string parsing I had to do in the frontend.
+During the Phase 1 review, the AI suggested using a dedicated `Conflict` dataclass instead of raw tuples for the conflict detection output. After evaluating the tradeoff, I kept raw tuples — the UI destructures the pair with a single `for _a, _b in _conflicts:` loop, which is readable enough without the overhead of an additional class. The simpler approach was the right call for a two-field result.
 
 ---
 
@@ -88,3 +87,23 @@ If I had another iteration, I would redesign the **Task Storage**. Currently, ev
 **c. Key takeaway**
 
 The most important thing I learned is the value of **"CLI-First" development**. By building and testing the core logic in a simple terminal environment before touching the Streamlit UI, I avoided hours of debugging browser-refresh issues and could focus entirely on the "brain" of the application.
+
+---
+
+## 6. AI Feature — Smart Scheduling
+
+**a. What was implemented**
+
+The final extension to the project is a Smart Scheduling feature powered by `PawPalAgent` in `agent.py`. The agent sends the user's plain-English text to Gemini 2.5 Flash with a constrained system prompt that demands only a raw JSON string in return — no explanation, no markdown. The response is parsed into `{pet_name, task_description, time}` and wired directly into the existing scheduler backend.
+
+**b. Helpful AI behavior**
+
+The most effective design decision was the **constrained JSON extraction prompt**. By explicitly forbidding markdown, explanations, and extra keys, the model reliably returns machine-parseable output on the first call, avoiding the need for a more complex parsing pipeline.
+
+**c. Flawed / limited AI behavior**
+
+The model can produce imperfect output — task descriptions that are vague, pet names that are paraphrased (breaking the lookup match), or time formats that require cleanup. The agent has no knowledge of the existing schedule, so it cannot warn about conflicts before a task is submitted.
+
+**d. Future improvement**
+
+The most impactful next step would be to extend the extraction prompt to also infer `duration`, `priority`, `category`, and `frequency` from the user's text, or to add a confirmation step that lets the user review and adjust the parsed values before the task is committed.

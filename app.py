@@ -1,8 +1,15 @@
+import logging
 from datetime import time
-from pawpal_system import Owner, Pet, Task, Scheduler
+from pawpal_system import Owner, Pet, Task, Scheduler, is_valid_time
 from agent import PawPalAgent
 
 import streamlit as st
+
+logging.basicConfig(
+    filename="pawpal.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -19,37 +26,10 @@ with st.sidebar:
 
 st.title("🐾 PawPal+")
 
-st.markdown(
-    """
-Welcome to the PawPal+ starter app.
-
-This file is intentionally thin. It gives you a working Streamlit app so you can start quickly,
-but **it does not implement the project logic**. Your job is to design the system and build it.
-
-Use this app as your interactive demo once your backend classes/functions exist.
-"""
+st.caption(
+    "PawPal+ manages pet care tasks, detects schedule conflicts, "
+    "and supports Mistral-powered smart scheduling."
 )
-
-with st.expander("Scenario", expanded=True):
-    st.markdown(
-        """
-**PawPal+** is a pet care planning assistant. It helps a pet owner plan care tasks
-for their pet(s) based on constraints like time, priority, and preferences.
-
-You will design and implement the scheduling logic and connect it to this Streamlit UI.
-"""
-    )
-
-with st.expander("What you need to build", expanded=True):
-    st.markdown(
-        """
-At minimum, your system should:
-- Represent pet care tasks (what needs to happen, how long it takes, priority)
-- Represent the pet and the owner (basic info and preferences)
-- Build a plan/schedule for a day that chooses and orders tasks based on constraints
-- Explain the plan (why each task was chosen and when it happens)
-"""
-    )
 
 # ── Conflict banner (always visible) ─────────────────────────────────────────
 _all_tasks = st.session_state.owner.get_all_tasks()
@@ -75,10 +55,18 @@ with col2:
 
 if st.button("Add Pet"):
     if new_pet_name.strip():
-        new_pet = Pet(name=new_pet_name.strip(), species=new_pet_species)
-        st.session_state.owner.add_pet(new_pet)
-        st.success(f"Added {new_pet.name} ({new_pet.species})")
-        st.rerun()
+        clean_name = new_pet_name.strip()
+        duplicate = next(
+            (p for p in st.session_state.owner.pets if p.name.lower() == clean_name.lower()),
+            None,
+        )
+        if duplicate:
+            st.warning(f"A pet named **{clean_name}** already exists. Please use a unique pet name.")
+        else:
+            new_pet = Pet(name=clean_name, species=new_pet_species)
+            st.session_state.owner.add_pet(new_pet)
+            st.success(f"Added {new_pet.name} ({new_pet.species})")
+            st.rerun()
     else:
         st.warning("Please enter a pet name.")
 
@@ -113,7 +101,7 @@ else:
     col1, col2 = st.columns(2)
     with col1:
         task_category = st.selectbox(
-            "Category", ["Feeding", "Exercise", "Health", "Grooming", "Other"], key="task_category"
+            "Category", ["Food", "Exercise", "Health", "Other"], key="task_category"
         )
     with col2:
         task_frequency = st.selectbox(
@@ -151,8 +139,10 @@ if st.button("Schedule with AI"):
         with st.spinner("Parsing your request..."):
             try:
                 agent = PawPalAgent()
-                parsed = agent.parse_user_request(ai_input.strip())
+                parsed = agent.parse_schedule_request(ai_input.strip())
+                logging.info("AI parsed scheduling request: %s", parsed)
             except Exception as e:
+                logging.exception("AI scheduling error")
                 st.error(f"AI parsing failed: {e}")
                 parsed = None
 
@@ -160,32 +150,48 @@ if st.button("Schedule with AI"):
             ai_pet_name = parsed.get("pet_name", "").strip()
             ai_task_desc = parsed.get("task_description", "").strip()
             ai_time = parsed.get("time", "").strip()
+            ai_priority = parsed.get("priority", 2)
+            ai_category = parsed.get("category", "Other")
 
-            matched_pet = next(
-                (p for p in st.session_state.owner.pets if p.name.lower() == ai_pet_name.lower()),
-                None,
-            )
-
-            if not matched_pet:
+            if not ai_pet_name or ai_pet_name.lower() == "unknown":
+                logging.warning("AI scheduling failed: pet not found: %s", ai_pet_name)
                 st.warning(
-                    f"No pet named **{ai_pet_name}** found. "
-                    "Please add that pet first using the 'Add a Pet' section above."
+                    "Could not identify a pet in your request. "
+                    "Please include the pet's name and try again."
+                )
+            elif not is_valid_time(ai_time):
+                logging.warning("AI scheduling failed: invalid time: %s", ai_time)
+                st.warning(
+                    "AI could not identify a valid time. "
+                    "Please try again with a specific time."
                 )
             else:
-                ai_task = Task(
-                    description=ai_task_desc or "Task",
-                    time=ai_time or "09:00",
-                    duration=20,
-                    priority=2,
-                    category="Other",
-                    frequency="Once",
+                matched_pet = next(
+                    (p for p in st.session_state.owner.pets if p.name.lower() == ai_pet_name.lower()),
+                    None,
                 )
-                matched_pet.add_task(ai_task)
-                st.success(
-                    f"Task added to **{matched_pet.name}**'s schedule: "
-                    f"'{ai_task.description}' at {ai_task.time}"
-                )
-                st.rerun()
+                if not matched_pet:
+                    logging.warning("AI scheduling failed: pet not found: %s", ai_pet_name)
+                    st.warning(
+                        f"No pet named **{ai_pet_name}** found. "
+                        "Please add that pet first using the 'Add a Pet' section above."
+                    )
+                else:
+                    ai_task = Task(
+                        description=ai_task_desc or "Task",
+                        time=ai_time or "09:00",
+                        duration=20,
+                        priority=ai_priority,
+                        category=ai_category,
+                        frequency="Once",
+                    )
+                    matched_pet.add_task(ai_task)
+                    logging.info("AI-created task added for pet: %s", ai_pet_name)
+                    st.success(
+                        f"Task added to **{matched_pet.name}**'s schedule: "
+                        f"'{ai_task.description}' at {ai_task.time}"
+                    )
+                    st.rerun()
 
 st.divider()
 
@@ -196,7 +202,10 @@ if not st.session_state.owner.pets:
     st.info("No pets added yet.")
 else:
     for pet in st.session_state.owner.pets:
-        visible = st.session_state.scheduler.filter_tasks(pet.tasks, show_completed=show_completed)
+        visible = st.session_state.scheduler.get_tasks_for_view(
+            pet.tasks,
+            show_completed=show_completed,
+        )
         with st.expander(f"{pet.name} ({pet.species}) — {len(visible)} {task_view.lower()} task(s)"):
             if visible:
                 st.table([

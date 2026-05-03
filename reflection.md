@@ -20,6 +20,7 @@ My initial design uses a modular, object-oriented approach with four primary cla
 Based on the AI architectural review, I made two key refinements to the design:
 1. **Time Parsing**: `Task.time` stores time as a string (e.g., `"09:00"`). A `_parse_time()` helper converts it to a `datetime` object only when needed for arithmetic comparisons in conflict detection and sorting — keeping the data model simple while still supporting robust comparisons.
 2. **Task Context**: Added a `pet_name` field to the `Task` dataclass so that the Scheduler can identify which pet a task belongs to when tasks are flattened into a single list.
+3. **Display-Time Adjustment**: Added a conflict-free display plan that shifts lower-ranked overlapping tasks later without silently changing the original stored task time.
 
 ---
 
@@ -27,16 +28,17 @@ Based on the AI architectural review, I made two key refinements to the design:
 
 **a. Constraints and priorities**
 
-The scheduler considers three primary constraints in a hierarchical "Three-Key Sort":
+The scheduler considers four primary constraints in a hierarchical sort:
 * **Completion Status**: Completed tasks are automatically pushed to the bottom of the list to keep the "To-Do" items front and center.
 * **Priority (1-3)**: Among pending tasks, high-priority items (Priority 1) are moved to the top.
-* **Time**: Tasks with the same priority are sorted chronologically.
+* **Category**: Health tasks rank above Food, Food above Exercise, and Exercise above Other.
+* **Time**: Tasks with the same priority and category are sorted chronologically.
 
 I decided that **Completion Status** was the most important constraint for user experience, as it prevents a cluttered "finished" list from burying urgent, upcoming tasks.
 
 **b. Tradeoffs**
 
-A key tradeoff in this design is the **"Exact Overlap"** detection. The scheduler flags a conflict if one task starts before another ends, but it does *not* account for "buffer time" or travel time between tasks. 
+A key tradeoff in this design is the **"Exact Overlap"** detection. The scheduler flags a conflict if one task starts before another ends and creates a conflict-free display plan by shifting lower-ranked overlapping tasks later. It does *not* account for "buffer time" or travel time between tasks.
 
 This is reasonable for a domestic pet care scenario where most tasks (feeding, meds) happen in the same location. Adding complex buffer logic would have increased the system's complexity without providing significant value for a single-home user.
 
@@ -61,14 +63,16 @@ During the Phase 1 review, the AI suggested using a dedicated `Conflict` datacla
 
 **a. What you tested**
 
-I implemented a suite of 10 automated tests using `pytest` covering:
+I implemented a suite of 45 automated tests using `pytest` covering:
 * **State Management**: Ensuring `mark_complete()` toggles correctly and clones recurring tasks.
 * **Logic Integrity**: Verifying that `add_task()` correctly stamps the pet's name onto the task.
 * **Boundary Conditions**: Testing sequential tasks (one ending exactly when another starts) to ensure they do *not* trigger a false conflict.
+* **Scheduler Reliability**: Verifying priority/category sorting, invalid time handling, and conflict-free display-time adjustment.
+* **AI Guardrails**: Testing Mistral JSON parsing, extra-key filtering, invalid JSON fallback, priority/category normalization, and invalid AI time rejection.
 
 **b. Confidence**
 
-I am highly confident in the core scheduler logic because the automated test suite passes 100% of the time in under 0.05 seconds. 
+I am highly confident in the core scheduler logic because the automated test suite passes 100% of the time and covers both backend scheduling behavior and the Streamlit display path.
 
 If I had more time, I would test **cross-day scheduling** (e.g., a task starting at 11:30 PM and ending at 12:30 AM) and **timezone transitions**, which are common edge cases for mobile users who travel with their pets.
 
@@ -94,7 +98,7 @@ The most important thing I learned is the value of **"CLI-First" development**. 
 
 **a. What was implemented**
 
-The final extension to the project is a Smart Scheduling feature powered by `PawPalAgent` in `agent.py`. The agent sends the user's plain-English text to Gemini 2.5 Flash with a constrained system prompt that demands only a raw JSON string in return — no explanation, no markdown. The response is parsed into `{pet_name, task_description, time}` and wired directly into the existing scheduler backend.
+The final extension to the project is a Smart Scheduling feature powered by `PawPalAgent` in `agent.py`. The agent sends the user's plain-English text to Mistral (`mistral-small-latest`) with a constrained system prompt and JSON mode so the response can be parsed into `{pet_name, task_description, time, priority, category}` and wired directly into the existing scheduler backend.
 
 **b. Helpful AI behavior**
 
@@ -102,8 +106,8 @@ The most effective design decision was the **constrained JSON extraction prompt*
 
 **c. Flawed / limited AI behavior**
 
-The model can produce imperfect output — task descriptions that are vague, pet names that are paraphrased (breaking the lookup match), or time formats that require cleanup. The agent has no knowledge of the existing schedule, so it cannot warn about conflicts before a task is submitted.
+The model can produce imperfect output: task descriptions that are vague, pet names that are paraphrased (breaking the lookup match), or invalid time/category/priority values. Guardrails normalize priority and category, reject invalid AI times before task creation, and let the scheduler handle conflicts after a task is submitted.
 
 **d. Future improvement**
 
-The most impactful next step would be to extend the extraction prompt to also infer `duration`, `priority`, `category`, and `frequency` from the user's text, or to add a confirmation step that lets the user review and adjust the parsed values before the task is committed.
+The most impactful next step would be to extend the extraction prompt to infer `duration` and `frequency`, or to add a confirmation step that lets the user review and adjust parsed values before the task is committed.

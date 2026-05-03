@@ -1,57 +1,93 @@
-# PawPal+ — Smart Pet Care Scheduler
+# PawPal+ - Smart Pet Care Scheduler
 
-PawPal+ is an intelligent daily planner for pet owners. Add your pets, assign care tasks with priorities and schedules, and let the built-in scheduler build an optimized, conflict-free day — automatically rescheduling recurring tasks so nothing gets missed.
+PawPal+ is an intelligent daily planner for pet owners. Add pets, assign care tasks with priorities and schedules, detect conflicts, and use AI Smart Scheduling to turn natural-language reminders into scheduled tasks.
 
 ---
 
 ## Base Project
 
-This project extends the **AI110 Module 2 Streamlit starter shell** provided as part of the lab assignment. The starter supplied a thin `app.py` with placeholder text describing what needed to be built. On top of that, this project implements:
+This project extends the **AI110 Module 2 Streamlit pet scheduler starter shell**. The starter provided the app shell; PawPal+ adds backend scheduling logic, a complete Streamlit workflow, automated tests, and an AI Smart Scheduling layer.
 
-- The complete backend scheduling system (`pawpal_system.py`) — `Task`, `Pet`, `Owner`, and `Scheduler` classes
-- The full Streamlit UI with all forms, task views, conflict banners, and schedule generation
-- An AI Smart Scheduling layer (`agent.py`) using Gemini 2.5 Flash for natural-language task entry
-- A 10-test automated test suite (`tests/test_pawpal.py`)
-- Full documentation (`model_card.md`, `reflection.md`, this README)
+Implemented additions include:
+
+- Core scheduling system in `pawpal_system.py`: `Task`, `Pet`, `Owner`, and `Scheduler`
+- Streamlit UI for pets, tasks, conflict banners, and schedule generation
+- AI Smart Scheduling in `agent.py` using Mistral for natural-language task entry
+- A 45-test automated test suite in `tests/test_pawpal.py`
+- Documentation in `README.md`, `model_card.md`, and `reflection.md`
+
+---
+
+## Project Summary
+
+PawPal+ manages pet care tasks, schedules them by completion state, priority, category, and time, detects overlapping tasks for the same pet, and allows natural-language scheduling through AI.
 
 ---
 
 ## Key Features
 
-### Three-Key Smart Sorting
-The scheduler orders your day using a three-level priority system:
+### Smart Sorting and Conflict-Aware Scheduling
 
-1. **Completion status** — pending tasks always surface above completed ones
-2. **Priority (1–3)** — high-priority items lead the list
-3. **Chronological time** — ties broken by start time for a clean daily flow
+The scheduler orders the day using:
+
+1. Completion status: pending tasks appear before completed ones
+2. Priority: high-priority tasks appear first
+3. Category importance: Health, Food, Exercise, then Other
+4. Time: tasks with the same priority and category are sorted chronologically
+
+After sorting, PawPal+ creates a conflict-free display plan per pet. If a lower-ranked task overlaps a higher-ranked task, the displayed start time is shifted to begin when the higher-ranked task ends. The original stored task time is not silently mutated.
+
+Example:
+
+| Task | Original Time | Duration | Priority | Category | Displayed Time |
+|---|---:|---:|---:|---|---:|
+| Get flu shot | 13:00 | 20 min | 1 | Health | 13:00 |
+| Run | 13:00 | 20 min | 2 | Exercise | 13:20 |
 
 ### Conflict Detection
-The scheduler scans every pet's task list for time overlaps using interval arithmetic (`start_time + duration`). Conflicts are flagged as persistent warnings at the top of the dashboard — visible at a glance without needing to generate a plan first.
+
+The scheduler scans each pet's tasks for overlaps using start time plus duration. Conflicts are shown as warnings at the top of the dashboard.
 
 ### Recurring Task Cloning
-Tasks can be marked `Once`, `Daily`, or `Weekly`. When a recurring task is completed, the system automatically clones it with the next scheduled date and re-adds it to the pet's list — keeping the schedule perpetually up to date without manual re-entry.
+
+Tasks can be marked `Once`, `Daily`, or `Weekly`. When a recurring task is completed, the system creates the next pending copy automatically.
 
 ### Pending / Completed Toggle
-A sidebar radio switch filters the entire dashboard — task tables, expander counts, and the generated plan — between **Pending** and **Completed** views instantly.
+
+A sidebar control switches the dashboard between pending and completed task views.
 
 ### Smart Scheduling (AI)
-A natural-language input field powered by `PawPalAgent` lets owners type scheduling requests in plain English — for example, *"Walk Buddy at 5 PM"* or *"Give Luna her medication at 8 AM."*
 
-The agent sends the request to `gemini-2.5-flash` with a strict JSON-extraction system prompt and extracts three fields:
+`PawPalAgent` lets owners type scheduling requests in plain English, such as `Walk Buddy at 5 PM`.
+
+The agent sends the request to Mistral (`mistral-small-latest`) with a strict JSON-extraction prompt. Mistral returns a JSON object with:
 
 | Field | Example |
 |---|---|
 | `pet_name` | `"Buddy"` |
-| `task_description` | `"Evening walk"` |
+| `task_description` | `"Walk"` |
 | `time` | `"17:00"` |
+| `priority` | `1` |
+| `category` | `"Exercise"` |
 
-The matching pet is located automatically and a task is added to their schedule — no manual form entry required. If the pet is not found, a warning is shown asking the user to add the pet first. See [`model_card.md`](model_card.md) for full agent documentation.
+`app.py` uses those fields to find the matching pet, create a `Task` with the parsed priority/category and default duration/frequency values, and add it through the existing scheduler path. If the pet is not found, the app shows a warning asking the user to add the pet first.
+
+Priority is mapped as `1 = high/urgent/super important/medicine/critical`, `2 = normal/default/medium`, and `3 = low/not urgent/optional`.
+
+Category is normalized using these keyword groups:
+
+| Category | Keywords |
+|---|---|
+| Health | medicine, medication, pill, vet, vaccine, flu shot, bath, grooming, clean, shower |
+| Food | feed, food, meal, breakfast, lunch, dinner, water |
+| Exercise | walk, run, exercise, play, training |
+| Other | fallback |
 
 ### Rejected AI Approaches
 
-**RAG (Retrieval-Augmented Generation)** was not used. The system operates on user-supplied data entered at runtime. There is no external document corpus or knowledge base to retrieve from.
+**RAG** was not used because PawPal+ does not have an external document corpus or knowledge base to retrieve from.
 
-**Full agentic workflow** (multi-step reasoning loop with tool use) was not used. The scheduling task requires only a single structured extraction — the input maps directly to three fields. Adding a reasoning loop would introduce latency and complexity with no benefit to the user.
+**A full agentic workflow** was not used because the task only needs single-step structured extraction from user text into scheduler fields.
 
 ---
 
@@ -63,19 +99,21 @@ The matching pet is located automatically and a task is added to their schedule 
 | UI Framework | Streamlit |
 | Testing | pytest |
 | Core Logic | Python `dataclasses`, `datetime`, `timedelta` |
-| AI Agent | Google Generative AI — `gemini-2.5-flash` (`google-generativeai`) |
+| AI Agent | Mistral AI - `mistral-small-latest` via `mistralai` |
 
 ---
 
 ## Setup & Installation
 
 **1. Clone the repository**
+
 ```bash
 git clone https://github.com/AhmadM2409/applied-ai-system-project
 cd applied-ai-system-project
 ```
 
 **2. Create and activate a virtual environment**
+
 ```bash
 python -m venv .venv
 # Windows
@@ -85,6 +123,7 @@ source .venv/bin/activate
 ```
 
 **3. Install dependencies**
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -92,110 +131,172 @@ pip install -r requirements.txt
 **4. Configure your API key**
 
 Create a `.env` file in the project root:
+
+```env
+MISTRAL_API_KEY=your_api_key_here
 ```
-GEMINI_API_KEY=your_api_key_here
-```
-The `.env` file is listed in `.gitignore` — never commit your API key.
+
+The `.env` file is listed in `.gitignore`; never commit your API key.
 
 **5. Run the app**
+
 ```bash
 streamlit run app.py
 ```
-
-The app will open in your browser at `http://localhost:8501`.
 
 ---
 
 ## Testing
 
-The automated test suite covers task completion, pet–task wiring, conflict detection, and boundary conditions (sequential tasks, cross-pet overlaps).
+Run the automated test suite:
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-Expected output:
+---
+
+## Reliability & Evaluation
+
+The project includes automated tests for both the core scheduler logic and the AI Smart Scheduling guardrails.
+
+Current test result:
+
+```text
+45 passed in 1.93s
 ```
-10 passed in 0.03s
-```
+
+Test coverage includes:
+
+* Task completion behavior
+* Recurring daily task cloning
+* Pet task assignment
+* Same-pet conflict detection
+* Cross-pet conflict avoidance
+* Sequential non-overlapping task handling
+* Conflict-free display-time adjustment
+* Scheduler ordering by priority, category, and time
+* Mistral JSON parsing
+* Priority normalization from model output and user wording
+* Category normalization and keyword inference
+* AI time validation
+* Extra-key filtering from model output
+* Invalid JSON fallback behavior
+
+### AI Smart Scheduling Evaluation
+
+The Mistral agent was tested with mocked model responses to verify that the app remains safe even when model output varies.
+
+| Scenario | Expected Behavior | Result |
+| --- | --- | --- |
+| Valid JSON response | Extract `pet_name`, `task_description`, `time`, `priority`, and `category` | Passed |
+| Priority/category normalization | Convert and infer safe priority/category values | Passed |
+| Extra model keys | Ignore extra keys and return only the five allowed fields | Passed |
+| Invalid JSON | Return empty fallback fields instead of crashing | Passed |
+
+A live smoke test also confirmed the real Mistral API can parse natural-language scheduling requests:
+
+| Input | Output |
+| --- | --- |
+| `Walk Buddy at 5 PM` | `{"pet_name": "Buddy", "task_description": "Walk", "time": "17:00", "priority": 2, "category": "Exercise"}` |
+| `Feed Luna at noon` | `{"pet_name": "Luna", "task_description": "Feed", "time": "12:00", "priority": 2, "category": "Food"}` |
+| `Give Max medicine at 8:30 AM` | `{"pet_name": "Max", "task_description": "Give medicine", "time": "08:30", "priority": 1, "category": "Health"}` |
+
+The Streamlit app was also tested end-to-end with:
+
+* successful AI task creation
+* missing-pet warning
+* conflict warning after AI-added overlapping tasks
+* conflict-free display adjustment for overlapping same-pet tasks
 
 ---
 
 ## Demo
 
-**Example 1 — AI adds a task successfully**
-1. Add a pet: name `Buddy`, species `Dog`
-2. In the Smart Scheduling section, type: `Walk Buddy at 5 PM`
-3. Expected: success message — *Task added to Buddy's schedule: 'Walk' at 17:00*
+**Example 1 - AI adds a task successfully**
 
-**Example 2 — Pet not found warning**
-1. In the Smart Scheduling section, type: `Feed Luna at noon`
-2. Expected: warning — *No pet named Luna found. Please add that pet first.*
+1. Add pet: `Buddy`, `Dog`
+2. Smart Scheduling input: `Walk Buddy at 5 PM`
+3. Expected: task added to Buddy around `17:00`, priority `2`, category `Exercise`
 
-**Example 3 — Conflict detection**
-1. With Buddy registered and the 5 PM walk already added, type: `Give Buddy medication at 5:10 PM`
-2. Expected: task added, then conflict banner fires at the top of the page — the new task overlaps with the walk still in progress
+**Example 2 - Pet not found warning**
+
+1. Smart Scheduling input: `Feed Luna at noon`
+2. Expected: warning because Luna has not been added
+
+**Example 3 - Conflict-aware scheduling**
+
+1. With Buddy registered and a 5 PM task already added, enter: `Give Buddy medication at 5:10 PM`
+2. Expected: task added with priority `1` and category `Health`; overlapping lower-ranked display times are shifted later in the task table
 
 ---
 
 ## Project Structure
 
-```
+```text
 applied-ai-system-project/
-├── app.py               # Streamlit UI — all pages, forms, and AI scheduling section
-├── pawpal_system.py     # Core logic — Task, Pet, Owner, Scheduler dataclasses
-├── agent.py             # AI agent — natural-language task parsing via Gemini
-├── requirements.txt     # All dependencies
-├── README.md            # This file
-├── model_card.md        # AI model documentation for the Gemini agent
-├── reflection.md        # Design decisions, tradeoffs, and AI collaboration notes
+├── app.py
+├── pawpal_system.py
+├── agent.py
+├── requirements.txt
+├── README.md
+├── model_card.md
+├── reflection.md
+├── assets/
+│   └── architecture.md
 └── tests/
-    └── test_pawpal.py   # 10 pytest tests covering core backend logic
+    └── test_pawpal.py
 ```
 
 ---
 
 ## Architecture & Data Flow
 
+A Mermaid system architecture diagram is included at [`assets/architecture.md`](assets/architecture.md).
+
+```text
+Manual form -> Task -> Pet.add_task() -> Scheduler
+
+User text -> PawPalAgent -> Mistral -> JSON dict
+          -> Task -> Pet.add_task() -> Scheduler
 ```
-Manual entry path:
-  User fills form → Task() → Pet.add_task() → Scheduler
 
-AI Smart Scheduling path:
-  User types text → PawPalAgent → Gemini 2.5 Flash
-                 → JSON {pet_name, task_description, time}
-                 → Task() with defaults → Pet.add_task() → Scheduler
+Scheduler operations:
 
-Scheduler operations (both paths):
-  Scheduler.generate_daily_plan()     →  sort by (is_completed, priority, time)
-  Scheduler.detect_conflicts()        →  interval overlap, per-pet grouping
+```text
+Scheduler.generate_daily_plan()       -> sorted conflict-free display plan
+Scheduler.get_tasks_for_view()        -> filtered sorted conflict-free display plan
+Scheduler.detect_conflicts()          -> interval overlap, grouped per pet
+```
 
 Data model:
-  Owner
-   └── Pet (1 or more)
-        └── Task (1 or more)
-             ├── mark_complete(pet)  →  clones self if Daily/Weekly
-             └── pet_name            →  stamped by Pet.add_task()
+
+```text
+Owner
+└── Pet
+    └── Task
 ```
 
 ---
 
 ## Limitations
 
-- The AI agent extracts only `pet_name`, `task_description`, and `time`. Fields such as `duration`, `priority`, `category`, and `frequency` are not extracted and default to fixed values (20 min, priority 2, "Other", "Once").
-- The AI has no awareness of the existing schedule before a task is submitted; it cannot warn about conflicts in advance.
-- Pet name matching uses case-insensitive comparison, but the model may paraphrase or misspell the pet name, causing a no-match warning.
-- All data is stored in `st.session_state`. Refreshing the browser clears all pets and tasks — there is no persistent storage.
-- No quantitative accuracy benchmark exists for the AI extraction step.
+- AI extracts only `pet_name`, `task_description`, `time`, `priority`, and `category`.
+- `duration` and `frequency` use defaults unless manually entered.
+- There is no persistent storage; data lives in `st.session_state`.
+- AI has no schedule awareness before task submission.
+- Pet name matching is simple case-insensitive matching.
+- PawPal+ is for scheduling only and does not provide medical or veterinary advice.
+- There is no quantitative AI accuracy benchmark.
 
 ---
 
 ## Design Tradeoffs
 
-**Conflict detection uses exact overlap** — a task is flagged if it starts before another ends. Buffer time between tasks is not modelled, which is a deliberate simplification: for a single-home domestic scenario, travel time is negligible and the added complexity would not benefit the target user.
+Conflict detection uses exact overlap: a task is flagged if it starts before another task ends. The display plan then shifts lower-ranked overlapping tasks later for the same pet. Buffer time is not modeled because this prototype focuses on same-home pet care tasks.
 
-**In-memory storage via `st.session_state`** — appropriate for a lab prototype but would require SQLite or a similar persistence layer for a production app.
+In-memory storage via `st.session_state` is appropriate for a lab prototype, but a production version would need persistent storage such as SQLite.
 
 ---
 
-*Built for AI110 — Module 2 Lab Assignment*
+Built for AI110.

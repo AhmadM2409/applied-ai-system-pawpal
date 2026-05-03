@@ -1,6 +1,20 @@
+import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, date
 from typing import List, Optional
+
+
+def is_valid_time(time_text: str) -> bool:
+    """Return True only for valid HH:MM 24-hour time strings."""
+    if not isinstance(time_text, str):
+        return False
+    if not re.fullmatch(r"\d{2}:\d{2}", time_text):
+        return False
+
+    hour_text, minute_text = time_text.split(":")
+    hour = int(hour_text)
+    minute = int(minute_text)
+    return 0 <= hour <= 23 and 0 <= minute <= 59
 
 
 def _parse_time(time_str: str) -> datetime:
@@ -11,6 +25,31 @@ def _parse_time(time_str: str) -> datetime:
         except ValueError:
             continue
     raise ValueError(f"Unrecognized time format: {time_str!r}")
+
+
+def _priority_rank(priority) -> int:
+    try:
+        parsed = int(priority)
+    except (TypeError, ValueError):
+        return 2
+    return parsed if parsed in (1, 2, 3) else 2
+
+
+def _category_rank(category: str) -> int:
+    ranks = {
+        "health": 0,
+        "food": 1,
+        "exercise": 2,
+        "other": 3,
+    }
+    return ranks.get(str(category or "").strip().lower(), 3)
+
+
+def _time_rank(time_text: str) -> datetime:
+    try:
+        return _parse_time(time_text)
+    except (TypeError, ValueError):
+        return datetime.max
 
 
 @dataclass
@@ -68,15 +107,60 @@ class Scheduler:
         tasks = owner.get_all_tasks()
         if not include_completed:
             tasks = self.filter_tasks(tasks, show_completed=False)
-        return self.sort_tasks_by_priority(tasks)
+        return self.generate_conflict_free_plan(tasks)
 
     def sort_tasks_by_priority(self, tasks: List[Task]) -> List[Task]:
-        """Sort by completed status (pending first), then priority (1 first), then start time."""
-        return sorted(tasks, key=lambda t: (t.is_completed, t.priority, _parse_time(t.time)))
+        """Sort by completion, priority, category importance, time, then description."""
+        return sorted(
+            tasks,
+            key=lambda t: (
+                1 if t.is_completed else 0,
+                _priority_rank(t.priority),
+                _category_rank(t.category),
+                _time_rank(t.time),
+                t.description.lower(),
+            ),
+        )
 
     def filter_tasks(self, tasks: List[Task], show_completed: bool = False) -> List[Task]:
         """Return only tasks whose completed status matches show_completed."""
         return [t for t in tasks if t.is_completed == show_completed]
+
+    def get_tasks_for_view(self, tasks: List[Task], show_completed: bool = False) -> List[Task]:
+        """Return filtered tasks in the same sorted order used by the UI."""
+        return self.generate_conflict_free_plan(
+            self.filter_tasks(tasks, show_completed=show_completed)
+        )
+
+    def generate_conflict_free_plan(self, tasks: List[Task]) -> List[Task]:
+        """Return sorted task copies with overlapping same-pet display times shifted later."""
+        pet_tasks: dict = {}
+        pet_order: List[str] = []
+        for task in tasks:
+            pet_key = task.pet_name
+            if pet_key not in pet_tasks:
+                pet_order.append(pet_key)
+                pet_tasks[pet_key] = []
+            pet_tasks[pet_key].append(task)
+
+        adjusted_plan: List[Task] = []
+        for pet_key in pet_order:
+            previous_end = None
+            for task in self.sort_tasks_by_priority(pet_tasks[pet_key]):
+                try:
+                    scheduled_start = _parse_time(task.time)
+                except (TypeError, ValueError):
+                    adjusted_plan.append(replace(task))
+                    continue
+
+                if previous_end is not None and scheduled_start < previous_end:
+                    scheduled_start = previous_end
+
+                adjusted_task = replace(task, time=scheduled_start.strftime("%H:%M"))
+                adjusted_plan.append(adjusted_task)
+                previous_end = scheduled_start + timedelta(minutes=task.duration)
+
+        return adjusted_plan
 
     def detect_conflicts(self, tasks: List[Task]) -> List[tuple]:
         """Return pairs of tasks that overlap in time for the same pet."""

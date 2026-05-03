@@ -1,6 +1,8 @@
 .env
 __pycache__/
 *.pyc
+*.log
+pawpal.log
 .venv/
 .venv_new/
 .pytest_cache/

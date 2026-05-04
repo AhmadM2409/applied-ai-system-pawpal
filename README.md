@@ -299,4 +299,4 @@ In-memory storage via `st.session_state` is appropriate for a lab prototype, but
 
 ---
 
-Built for AI110.
+Video Demo: https://drive.google.com/file/d/1vx7MblUcL9BFpkV_83N1N7fKPXWsnbEk/view?usp=sharing
